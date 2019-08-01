@@ -9,8 +9,14 @@ import org.webrtc.*
  * Create by kgxl on 2019/7/23
  */
 class RealPeer : PeerConnection.Observer, SdpObserver {
-    private var id: String = ""
-    private var peerConnection: PeerConnection? = null
+    var id: String = ""
+    var pc: PeerConnection? = null
+
+    constructor(id: String, pc: PeerConnection) {
+        this.id = id
+        this.pc = pc
+    }
+
     override fun onIceCandidate(p0: IceCandidate?) {
     }
 
@@ -57,7 +63,7 @@ class RealPeer : PeerConnection.Observer, SdpObserver {
             payload.put("type", sdp.type.canonicalForm())
             payload.put("sdp", sdp.description)
             SocketManager.instance.sendMessage(id, sdp.type.canonicalForm(), payload)
-            peerConnection?.setLocalDescription(this, sdp)
+            pc?.setLocalDescription(this, sdp)
         } catch (e: JSONException) {
             e.printStackTrace()
         }

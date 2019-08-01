@@ -12,7 +12,6 @@ import org.webrtc.RendererCommon
 import org.webrtc.SurfaceViewRenderer
 
 class MainActivity : AppCompatActivity() {
-    private val address = "172.16.16.21:3000"
     lateinit var gl_big: SurfaceViewRenderer
     lateinit var gl_small: SurfaceViewRenderer
     private var eglBase: EglBase? = null
@@ -41,7 +40,7 @@ class MainActivity : AppCompatActivity() {
         gl_big.setZOrderMediaOverlay(true)
 
         checkNeedPermission()
-        WebRtcClient.instance.connect("http://$address")
+        WebRtcClient.instance.connect("http://${getString(R.string.ip_address)}")
 
     }
 

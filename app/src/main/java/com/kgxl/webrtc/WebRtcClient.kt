@@ -27,7 +27,7 @@ class WebRtcClient private constructor() {
     private val VIDEO_FPS = 30
     private var serviceGenerateId = false
     private val iceServers = LinkedList<PeerConnection.IceServer>()
-    private val peers: HashMap<String, PeerConnection> = hashMapOf()
+    private val peers: HashMap<String, RealPeer> = hashMapOf()
 
     companion object {
         val instance by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { WebRtcClient() }
@@ -45,6 +45,7 @@ class WebRtcClient private constructor() {
     private var videoSource: VideoSource? = null
     private var mediaConstraints: MediaConstraints? = null
     private var localMS: MediaStream? = null
+    private val commandMap: HashMap<String, Command> = hashMapOf()
     private val mPeerConnectionObserver: PeerConnection.Observer = object : PeerConnection.Observer {
         override fun onIceCandidate(candidate: IceCandidate) {
             try {
@@ -132,6 +133,10 @@ class WebRtcClient private constructor() {
     }
 
     fun connect(address: String) {
+        commandMap["init"] = CreateOfferCommand()
+        commandMap["offer"] = CreateAnswerCommand()
+        commandMap["answer"] = SetRemoteSDPCommand()
+        commandMap["candidate"] = AddIceCandidateCommand()
         SocketManager.instance.setOnConnectStateListener(object : SocketManager.onConnectStateListener {
             override fun connectSuccess() {
                 Log.e("zjy", "connectSuccess")
@@ -159,6 +164,7 @@ class WebRtcClient private constructor() {
                     val message = JSONObject()
                     message.put("name", "test")
                     SocketManager.instance.getSocket()?.emit("readyToStream", message)
+
                 } catch (e: JSONException) {
                     e.printStackTrace()
                 }
@@ -179,21 +185,27 @@ class WebRtcClient private constructor() {
                     if (type != "init") {
                         payload = data.getJSONObject("payload")
                     }
-                    Log.e("zjy", "peer--->${mPeerConnection.toString()}")
-                    if (type == "offer") {
-                        onRemoteOfferReceived(from, payload)
-                    } else if (type == "answer") {
-                        onReceiveRemoteAnswer(from, payload)
-                    } else if (type == "candidate") {
-                        val candidate = IceCandidate(
-                            payload?.getString("id"),
-                            payload?.getInt("label") ?: 0,
-                            payload?.getString("candidate")
-                        )
-                        mPeerConnection?.addIceCandidate(candidate)
-                    } else if (type == "init") {
-                        createOffer(from)
+                    if (!peers.containsKey(from)) {
+                        val pc = createPeerConnect()
+                        pc.addStream(localMS)
+                        val peer = RealPeer(from, pc)
+                        peers[from] = peer
                     }
+                    commandMap[type]?.execute(from, payload)
+//                    if (type == "offer") {
+//                        onRemoteOfferReceived(from, payload)
+//                    } else if (type == "answer") {
+//                        onReceiveRemoteAnswer(from, payload)
+//                    } else if (type == "candidate") {
+//                        val candidate = IceCandidate(
+//                            payload?.getString("id"),
+//                            payload?.getInt("label") ?: 0,
+//                            payload?.getString("candidate")
+//                        )
+//                        mPeerConnection?.addIceCandidate(candidate)
+//                    } else if (type == "init") {
+//                        createOffer(from)
+//                    }
 
                 } catch (e: JSONException) {
                     e.printStackTrace()
@@ -216,8 +228,8 @@ class WebRtcClient private constructor() {
         this.remoteSurface = remoteSurface
         this.localSurface = localSurface
         this.context = context
-//        iceServers.add(PeerConnection.IceServer.builder("stun:23.21.150.121").createIceServer())
-//        iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
+        iceServers.add(PeerConnection.IceServer.builder("stun:23.21.150.121").createIceServer())
+        iceServers.add(PeerConnection.IceServer.builder("stun:stun.l.google.com:19302").createIceServer())
         val sink = ProxyVideoSink()
         sink.setTarget(localSurface)
         //初始化peerConnectFactory
@@ -274,21 +286,17 @@ class WebRtcClient private constructor() {
             Toast.makeText(context, "连接服务器失败", Toast.LENGTH_SHORT).show()
             return
         }
-        mPeerConnection = createPeerConnect()
-        mPeerConnection?.removeStream(localMS)
-        mPeerConnection?.addStream(localMS)
         SocketManager.instance.sendMessage(uuid, "init", null)
 //        createOffer(uuid)
     }
 
-    private fun createOffer(from: String) {
-        getPeerConnect(from)
-        mPeerConnection?.createOffer(object : simpleSdpObserver {
-            override fun onCreateSuccess(sdp: SessionDescription) {
-                onCreateSdpSuccessSend(sdp, this)
-            }
-        }, mediaConstraints)
-    }
+//    private fun createOffer(from: String) {
+//        mPeerConnection?.createOffer(object : simpleSdpObserver {
+//            override fun onCreateSuccess(sdp: SessionDescription) {
+//                onCreateSdpSuccessSend(sdp, this)
+//            }
+//        }, mediaConstraints)
+//    }
 
     private fun createPeerConnect(): PeerConnection {
         val configuration = PeerConnection.RTCConfiguration(iceServers)
@@ -352,76 +360,73 @@ class WebRtcClient private constructor() {
         return null
     }
 
-    private fun getPeerConnect(type: String) {
-//        if (!peers.containsKey(type) || peers[type] == null) {
-//            mPeerConnection = createPeerConnect()
-//            peers[type] = mPeerConnection!!
-//        } else {
-//            mPeerConnection = peers[type]
-//        }
-    }
-
     /**
      * 收到了服务端回复offer
      */
-    private fun onRemoteOfferReceived(from: String, message: JSONObject?) {
-        getPeerConnect(from)
-        try {
-            val sdp = SessionDescription(
-                SessionDescription.Type.fromCanonicalForm(message?.getString("type")),
-                message?.getString("sdp")
-            )
-            mPeerConnection?.setRemoteDescription(object : simpleSdpObserver {}, sdp)
-            doAnswerCall(from)
-        } catch (e: JSONException) {
-            e.printStackTrace()
-        }
-    }
-
-    /**
-     * 收到了offer回复
-     * 创建answer 发送
-     */
-    private fun doAnswerCall(from: String) {
-        getPeerConnect(from)
-        mPeerConnection?.createAnswer(object : simpleSdpObserver {
-            override fun onCreateSuccess(sdp: SessionDescription) {
-                Log.e(TAG, "answer create success")
-                onCreateSdpSuccessSend(sdp, this)
-            }
-
-            override fun onCreateFailure(p0: String?) {
-                super.onCreateFailure(p0)
-                Log.e(TAG, "answer create failure--->$p0")
-            }
-        }, mediaConstraints)
-    }
-
-    private fun onReceiveRemoteAnswer(from: String, message: JSONObject?) {
-        try {
-            val description = message?.getString("sdp")
-            getPeerConnect(from)
-            mPeerConnection?.setRemoteDescription(
-                object : simpleSdpObserver {
-                    override fun onSetFailure(errorMsg: String?) {
-                        Log.e("zjy", "onReceiveRemoteAnswer onSetFailure--->$errorMsg")
-                    }
-
-                    override fun onCreateSuccess(sdp: SessionDescription) {
-                        Log.e("zjy", "onReceiveRemoteAnswer onCreateSuccess--->${sdp.type}")
-                        onCreateSdpSuccessSend(sdp, this)
-                    }
-                },
-                SessionDescription(SessionDescription.Type.ANSWER, description)
-            )
-        } catch (e: JSONException) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun onCreateSdpSuccessSend(sdp: SessionDescription, sdpObserver: SdpObserver) {
-
-    }
+//    private fun onRemoteOfferReceived(from: String, message: JSONObject?) {
+//        try {
+//            val sdp = SessionDescription(
+//                SessionDescription.Type.fromCanonicalForm(message?.getString("type")),
+//                message?.getString("sdp")
+//            )
+//            mPeerConnection?.setRemoteDescription(object : simpleSdpObserver {}, sdp)
+//            doAnswerCall(from)
+//        } catch (e: JSONException) {
+//            e.printStackTrace()
+//        }
+//    }
+//
+//    /**
+//     * 收到了offer回复
+//     * 创建answer 发送
+//     */
+//    private fun doAnswerCall(from: String) {
+//        mPeerConnection?.createAnswer(object : simpleSdpObserver {
+//            override fun onCreateSuccess(sdp: SessionDescription) {
+//                Log.e(TAG, "answer create success")
+//                onCreateSdpSuccessSend(sdp, this)
+//            }
+//
+//            override fun onCreateFailure(p0: String?) {
+//                super.onCreateFailure(p0)
+//                Log.e(TAG, "answer create failure--->$p0")
+//            }
+//        }, mediaConstraints)
+//    }
+//
+//    private fun onReceiveRemoteAnswer(from: String, message: JSONObject?) {
+//        try {
+//            val description = message?.getString("sdp")
+//            mPeerConnection?.setRemoteDescription(
+//                object : simpleSdpObserver {
+//                    override fun onSetFailure(errorMsg: String?) {
+//                        Log.e("zjy", "onReceiveRemoteAnswer onSetFailure--->$errorMsg")
+//                    }
+//
+//                    override fun onCreateSuccess(sdp: SessionDescription) {
+//                        Log.e("zjy", "onReceiveRemoteAnswer onCreateSuccess--->${sdp.type}")
+//                        onCreateSdpSuccessSend(sdp, this)
+//                    }
+//                },
+//                SessionDescription(SessionDescription.Type.ANSWER, description)
+//            )
+//        } catch (e: JSONException) {
+//            e.printStackTrace()
+//        }
+//    }
+//
+//    private fun onCreateSdpSuccessSend(sdp: SessionDescription, sdpObserver: SdpObserver) {
+//        Log.e("zjy", "onCreateSdpSuccessSend-->${sdp.type.canonicalForm()}")
+//        mPeerConnection?.setLocalDescription(sdpObserver, sdp)
+//        try {
+//            val payload = JSONObject()
+//            payload.put("type", sdp.type.canonicalForm())
+//            payload.put("sdp", sdp.description)
+//            SocketManager.instance.sendMessage(uuid, sdp.type.canonicalForm(), payload)
+//        } catch (e: JSONException) {
+//            e.printStackTrace()
+//        }
+//    }
 
     class ProxyVideoSink : VideoSink {
         private var mTarget: VideoSink? = null
@@ -437,6 +442,64 @@ class WebRtcClient private constructor() {
         @Synchronized
         internal fun setTarget(target: VideoSink) {
             this.mTarget = target
+        }
+    }
+
+    private interface Command {
+        @Throws(JSONException::class)
+        fun execute(peerId: String, payload: JSONObject?)
+    }
+
+    private inner class CreateOfferCommand : Command {
+
+        @Throws(JSONException::class)
+        override fun execute(peerId: String, payload: JSONObject?) {
+            Log.d(TAG, "CreateOfferCommand")
+            val peer = peers[peerId]
+            peer?.pc?.createOffer(peer, mediaConstraints)
+        }
+    }
+
+    private inner class CreateAnswerCommand : Command {
+        @Throws(JSONException::class)
+        override fun execute(peerId: String, payload: JSONObject?) {
+            Log.d(TAG, "CreateAnswerCommand")
+            val peer = peers[peerId]
+            val sdp = SessionDescription(
+                SessionDescription.Type.fromCanonicalForm(payload?.getString("type")),
+                payload?.getString("sdp")
+            )
+            peer?.pc?.setRemoteDescription(peer, sdp)
+            peer?.pc?.createAnswer(peer, mediaConstraints)
+        }
+    }
+
+    private inner class SetRemoteSDPCommand : Command {
+        @Throws(JSONException::class)
+        override fun execute(peerId: String, payload: JSONObject?) {
+            Log.d(TAG, "SetRemoteSDPCommand")
+            val peer = peers[peerId]
+            val sdp = SessionDescription(
+                SessionDescription.Type.fromCanonicalForm(payload?.getString("type")),
+                payload?.getString("sdp")
+            )
+            peer?.pc?.setRemoteDescription(peer, sdp)
+        }
+    }
+
+    private inner class AddIceCandidateCommand : Command {
+        @Throws(JSONException::class)
+        override fun execute(peerId: String, payload: JSONObject?) {
+            Log.d(TAG, "AddIceCandidateCommand")
+            val pc = peers[peerId]?.pc
+            if (pc?.getRemoteDescription() != null) {
+                val candidate = IceCandidate(
+                    payload?.getString("id"),
+                    payload?.getInt("label") ?: 0,
+                    payload?.getString("candidate")
+                )
+                pc?.addIceCandidate(candidate)
+            }
         }
     }
 
