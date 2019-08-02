@@ -1,6 +1,7 @@
 package com.kgxl.webrtc
 
 import android.content.Context
+import android.text.TextUtils
 import android.util.Log
 import android.widget.Toast
 import org.json.JSONException
@@ -38,6 +39,7 @@ class WebRtcClient private constructor() {
     private val VIDEO_RESOLUTION_HEIGHT = 720
     private val VIDEO_FPS = 30
     private var serviceGenerateId = false
+    private var isCall = false
     private val iceServers = LinkedList<PeerConnection.IceServer>()
     private val peers: HashMap<String, RealPeer> = hashMapOf()
 
@@ -161,7 +163,7 @@ class WebRtcClient private constructor() {
 
             override fun disconnect() {
                 Log.e("zjy", "disconnect")
-
+                serviceGenerateId = false
             }
 
             override fun connecting() {
@@ -172,14 +174,6 @@ class WebRtcClient private constructor() {
             override fun userJoin(signal: String) {
                 uuid = signal
                 serviceGenerateId = true
-                try {
-                    val message = JSONObject()
-                    message.put("name", "test")
-                    SocketManager.instance.getSocket()?.emit("readyToStream", message)
-
-                } catch (e: JSONException) {
-                    e.printStackTrace()
-                }
                 Log.e("zjy", "userJoin-->$signal")
             }
 
@@ -187,9 +181,12 @@ class WebRtcClient private constructor() {
                 Log.e("zjy", "userLeave-->$signal")
             }
 
+            override fun result(msg: String) {
+                Log.e("zjy", "result-->$msg")
+            }
+
             override fun receiveMsg(msg: String) {
                 val data = JSONObject(msg)
-                Log.e("zjy", "call--->$data")
                 try {
                     val from = data.optString("from")
                     val type = data.optString("type")
@@ -204,21 +201,6 @@ class WebRtcClient private constructor() {
                         peers[from] = peer
                     }
                     commandMap[type]?.execute(from, payload)
-//                    if (type == "offer") {
-//                        onRemoteOfferReceived(from, payload)
-//                    } else if (type == "answer") {
-//                        onReceiveRemoteAnswer(from, payload)
-//                    } else if (type == "candidate") {
-//                        val candidate = IceCandidate(
-//                            payload?.getString("id"),
-//                            payload?.getInt("label") ?: 0,
-//                            payload?.getString("candidate")
-//                        )
-//                        mPeerConnection?.addIceCandidate(candidate)
-//                    } else if (type == "init") {
-//                        createOffer(from)
-//                    }
-
                 } catch (e: JSONException) {
                     e.printStackTrace()
                 }
@@ -294,21 +276,13 @@ class WebRtcClient private constructor() {
     }
 
     fun startCall() {
-        if (!serviceGenerateId) {
+        if (!serviceGenerateId || TextUtils.isEmpty(uuid)) {
             Toast.makeText(context, "连接服务器失败", Toast.LENGTH_SHORT).show()
             return
         }
-        SocketManager.instance.sendMessage(uuid, "init", null)
-//        createOffer(uuid)
+        if (serviceGenerateId)
+            SocketManager.instance.sendMessage(uuid, "init", null)
     }
-
-//    private fun createOffer(from: String) {
-//        mPeerConnection?.createOffer(object : simpleSdpObserver {
-//            override fun onCreateSuccess(sdp: SessionDescription) {
-//                onCreateSdpSuccessSend(sdp, this)
-//            }
-//        }, mediaConstraints)
-//    }
 
     private fun createPeerConnect(): PeerConnection {
         val configuration = PeerConnection.RTCConfiguration(iceServers)
@@ -372,73 +346,6 @@ class WebRtcClient private constructor() {
         return null
     }
 
-    /**
-     * 收到了服务端回复offer
-     */
-//    private fun onRemoteOfferReceived(from: String, message: JSONObject?) {
-//        try {
-//            val sdp = SessionDescription(
-//                SessionDescription.Type.fromCanonicalForm(message?.getString("type")),
-//                message?.getString("sdp")
-//            )
-//            mPeerConnection?.setRemoteDescription(object : simpleSdpObserver {}, sdp)
-//            doAnswerCall(from)
-//        } catch (e: JSONException) {
-//            e.printStackTrace()
-//        }
-//    }
-//
-//    /**
-//     * 收到了offer回复
-//     * 创建answer 发送
-//     */
-//    private fun doAnswerCall(from: String) {
-//        mPeerConnection?.createAnswer(object : simpleSdpObserver {
-//            override fun onCreateSuccess(sdp: SessionDescription) {
-//                Log.e(TAG, "answer create success")
-//                onCreateSdpSuccessSend(sdp, this)
-//            }
-//
-//            override fun onCreateFailure(p0: String?) {
-//                super.onCreateFailure(p0)
-//                Log.e(TAG, "answer create failure--->$p0")
-//            }
-//        }, mediaConstraints)
-//    }
-//
-//    private fun onReceiveRemoteAnswer(from: String, message: JSONObject?) {
-//        try {
-//            val description = message?.getString("sdp")
-//            mPeerConnection?.setRemoteDescription(
-//                object : simpleSdpObserver {
-//                    override fun onSetFailure(errorMsg: String?) {
-//                        Log.e("zjy", "onReceiveRemoteAnswer onSetFailure--->$errorMsg")
-//                    }
-//
-//                    override fun onCreateSuccess(sdp: SessionDescription) {
-//                        Log.e("zjy", "onReceiveRemoteAnswer onCreateSuccess--->${sdp.type}")
-//                        onCreateSdpSuccessSend(sdp, this)
-//                    }
-//                },
-//                SessionDescription(SessionDescription.Type.ANSWER, description)
-//            )
-//        } catch (e: JSONException) {
-//            e.printStackTrace()
-//        }
-//    }
-//
-//    private fun onCreateSdpSuccessSend(sdp: SessionDescription, sdpObserver: SdpObserver) {
-//        Log.e("zjy", "onCreateSdpSuccessSend-->${sdp.type.canonicalForm()}")
-//        mPeerConnection?.setLocalDescription(sdpObserver, sdp)
-//        try {
-//            val payload = JSONObject()
-//            payload.put("type", sdp.type.canonicalForm())
-//            payload.put("sdp", sdp.description)
-//            SocketManager.instance.sendMessage(uuid, sdp.type.canonicalForm(), payload)
-//        } catch (e: JSONException) {
-//            e.printStackTrace()
-//        }
-//    }
 
     class ProxyVideoSink : VideoSink {
         private var mTarget: VideoSink? = null
@@ -513,20 +420,6 @@ class WebRtcClient private constructor() {
                 pc?.addIceCandidate(candidate)
             }
         }
-    }
-
-    interface simpleSdpObserver : SdpObserver {
-        override fun onSetFailure(errorMsg: String?) {
-        }
-
-        override fun onSetSuccess() {
-        }
-
-        override fun onCreateSuccess(p0: SessionDescription) {
-
-        }
-
-        override fun onCreateFailure(p0: String?) {}
     }
 
     fun switchCamera() {

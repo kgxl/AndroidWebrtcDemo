@@ -30,6 +30,7 @@ class SocketManager {
         fun userJoin(signal: String)
         fun userLeave(signal: String)
         fun receiveMsg(msg: String)
+        fun result(msg: String)
     }
 
     fun setOnConnectStateListener(onConnectStateListener: onConnectStateListener) {
@@ -68,6 +69,12 @@ class SocketManager {
             mOnRtcListener?.receiveMsg(it[0].toString())
         }?.on("id") {
             mOnRtcListener?.userJoin(it[0].toString())
+        }?.on("leave"){
+            mOnRtcListener?.userLeave(it[0].toString())
+        }?.on("newUserJoin"){
+            mOnRtcListener?.receiveMsg(it[0].toString())
+        }?.on("errorMsg"){
+            mOnRtcListener?.result(it[0].toString())
         }
         mSocket?.connect()
     }
