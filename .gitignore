@@ -6,3 +6,5 @@
 /build
 /captures
 .externalNativeBuild
+server/node_modules
+server/package-lock.json

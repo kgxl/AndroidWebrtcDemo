@@ -12,6 +12,18 @@ import kotlin.collections.ArrayList
 import org.webrtc.MediaConstraints
 import kotlin.collections.HashMap
 import org.webrtc.MediaStream
+import android.R.attr.orientation
+import android.hardware.Camera
+import android.hardware.Camera.CameraInfo
+import android.hardware.Camera.CameraInfo.CAMERA_FACING_FRONT
+import android.view.Surface
+import android.view.Surface.ROTATION_0
+import android.view.Surface.ROTATION_270
+import android.view.Surface.ROTATION_180
+import android.view.Surface.ROTATION_90
+import androidx.core.view.ViewCompat.getRotation
+import androidx.core.content.ContextCompat.getSystemService
+import android.view.WindowManager
 
 
 /***
@@ -240,9 +252,9 @@ class WebRtcClient private constructor() {
 
         videoSource = peerFactory?.createVideoSource(false)
         surfaceTextureHelper = SurfaceTextureHelper.create("videoCapture", eglContext)
+//        surfaceTextureHelper?.setFrameRotation(getRotationDegree())
         videoCapture = createVideoCapture()
         videoCapture?.initialize(surfaceTextureHelper, context, videoSource?.capturerObserver)
-
         //视频
         mVideoTrack = peerFactory?.createVideoTrack(VIDEO_TRACK_ID, videoSource)
         mVideoTrack?.setEnabled(true)
@@ -519,5 +531,25 @@ class WebRtcClient private constructor() {
 
     fun switchCamera() {
         (videoCapture as CameraVideoCapturer).switchCamera(null)
+    }
+
+    private fun getRotationDegree(): Int {
+        var orientation = 0
+
+        val wm = context?.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        when (wm.defaultDisplay.rotation) {
+            Surface.ROTATION_90 -> orientation = 90
+            Surface.ROTATION_180 -> orientation = 180
+            Surface.ROTATION_270 -> orientation = 270
+            Surface.ROTATION_0 -> orientation = 0
+            else -> orientation = 0
+        }
+
+        val cameraInfo = CameraInfo()
+        return if (cameraInfo.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            (720 - (cameraInfo.orientation + orientation)) % 360
+        } else {
+            (360 - orientation + cameraInfo.orientation) % 360
+        }
     }
 }
