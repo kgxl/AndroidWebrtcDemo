@@ -25,8 +25,10 @@ socket.on('connection', (client) => {
             const element = users[index];
             if (element != client.id) {
                 var otherClient = socket.sockets.connected[element];
-                otherClient.emit('id', client.id);
-                client.emit('id', element);
+                if (otherClient != null)
+                    otherClient.emit('id', client.id);
+                if (client != null)
+                    client.emit('id', element);
             }
         }
     }
@@ -36,12 +38,14 @@ socket.on('connection', (client) => {
         console.log('message-->' + detail.type + "<--->" + detail.to);
         var otherClient = socket.sockets.connected[detail.to];
         if (!otherClient) {
-            client.emit('errorMsg', '请确认是否有在线用户~');
+            if (client != null)
+                client.emit('errorMsg', '请确认是否有在线用户~');
             return;
         }
         delete detail.to;
         detail.from = client.id;
-        otherClient.emit('message', detail);
+        if (otherClient != null)
+            otherClient.emit('message', detail);
     });
     client.on('disconnect', function () {
         removeUserbyId(client.id);

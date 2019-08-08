@@ -17,6 +17,7 @@ import android.R.attr.orientation
 import android.hardware.Camera
 import android.hardware.Camera.CameraInfo
 import android.hardware.Camera.CameraInfo.CAMERA_FACING_FRONT
+import android.media.AudioManager
 import android.view.Surface
 import android.view.Surface.ROTATION_0
 import android.view.Surface.ROTATION_270
@@ -25,6 +26,7 @@ import android.view.Surface.ROTATION_90
 import androidx.core.view.ViewCompat.getRotation
 import androidx.core.content.ContextCompat.getSystemService
 import android.view.WindowManager
+import androidx.core.content.getSystemService
 
 
 /***
@@ -42,6 +44,8 @@ class WebRtcClient private constructor() {
     private var isCall = false
     private val iceServers = LinkedList<PeerConnection.IceServer>()
     private val peers: HashMap<String, RealPeer> = hashMapOf()
+    private var defaultMirror = true
+    private var defaultMute = false
 
     companion object {
         val instance by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { WebRtcClient() }
@@ -80,12 +84,19 @@ class WebRtcClient private constructor() {
         }
 
         override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
+            if (state == PeerConnection.IceConnectionState.FAILED) {
+                isCall = false
+            }
+            if (state == PeerConnection.IceConnectionState.CONNECTED) {
+                isCall = true
+            }
             if (state == PeerConnection.IceConnectionState.DISCONNECTED) {
                 peers.keys.forEach {
                     if (!it.equals(uuid)) {
                         peers.remove(it)
                     }
                 }
+                isCall = false
             }
             Log.e("zjy", "onIceConnectionChange-->$state")
         }
@@ -114,6 +125,7 @@ class WebRtcClient private constructor() {
 
         override fun onAddTrack(rtpReceiver: RtpReceiver?, p1: Array<out MediaStream>?) {
             Log.e("zjy", "onAddVideoTrack")
+            isCall = true
             val track = rtpReceiver?.track()
             if (track is VideoTrack) {
                 val remoteVideoTrack = track
@@ -280,8 +292,9 @@ class WebRtcClient private constructor() {
             Toast.makeText(context, "连接服务器失败", Toast.LENGTH_SHORT).show()
             return
         }
-        if (serviceGenerateId)
+        if (serviceGenerateId && !getIsCall()) {
             SocketManager.instance.sendMessage(uuid, "init", null)
+        }
     }
 
     private fun createPeerConnect(): PeerConnection {
@@ -313,20 +326,20 @@ class WebRtcClient private constructor() {
         return builder.createPeerConnectionFactory()
     }
 
-    private fun createVideoCapture(isFront: Boolean = true): VideoCapturer? {
+    private fun createVideoCapture(): VideoCapturer? {
         return if (Camera2Enumerator.isSupported(context)) {
-            createCameraCapture(Camera2Enumerator(context), isFront)
+            createCameraCapture(Camera2Enumerator(context))
         } else {
-            createCameraCapture(Camera1Enumerator(true), isFront)
+            createCameraCapture(Camera1Enumerator(true))
         }
     }
 
-    private fun createCameraCapture(enumerator: CameraEnumerator, isFront: Boolean): VideoCapturer? {
+    private fun createCameraCapture(enumerator: CameraEnumerator): VideoCapturer? {
         val deviceNames = enumerator.deviceNames
 
         // First, try to find front facing camera
         for (deviceName in deviceNames) {
-            if (isFront && enumerator.isFrontFacing(deviceName)) {
+            if (enumerator.isFrontFacing(deviceName)) {
                 val videoCapturer = enumerator.createCapturer(deviceName, null)
                 if (videoCapturer != null) {
                     return videoCapturer
@@ -336,7 +349,7 @@ class WebRtcClient private constructor() {
 
         // Front facing camera not found, try something else
         for (deviceName in deviceNames) {
-            if (!isFront && enumerator.isBackFacing(deviceName)) {
+            if (enumerator.isBackFacing(deviceName)) {
                 val videoCapturer = enumerator.createCapturer(deviceName, null)
                 if (videoCapturer != null) {
                     return videoCapturer
@@ -423,26 +436,27 @@ class WebRtcClient private constructor() {
     }
 
     fun switchCamera() {
+        defaultMirror = !defaultMirror
+        localSurface?.setMirror(defaultMirror)
         (videoCapture as CameraVideoCapturer).switchCamera(null)
     }
 
-    private fun getRotationDegree(): Int {
-        var orientation = 0
+    fun getIsCall(): Boolean {
+        return isCall
+    }
 
-        val wm = context?.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        when (wm.defaultDisplay.rotation) {
-            Surface.ROTATION_90 -> orientation = 90
-            Surface.ROTATION_180 -> orientation = 180
-            Surface.ROTATION_270 -> orientation = 270
-            Surface.ROTATION_0 -> orientation = 0
-            else -> orientation = 0
-        }
+    fun switchAudioMute() {
+        defaultMute = !defaultMute
+        mAudioTrack?.setEnabled(!defaultMute)
+    }
 
-        val cameraInfo = CameraInfo()
-        return if (cameraInfo.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
-            (720 - (cameraInfo.orientation + orientation)) % 360
-        } else {
-            (360 - orientation + cameraInfo.orientation) % 360
+    fun switchAudioMode() {
+        val am = context?.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        println("before audio mode--->" + am.isWiredHeadsetOn + "---" + am.mode + "----" + am.isSpeakerphoneOn)
+        if (!am.isWiredHeadsetOn) {
+            am.isSpeakerphoneOn = !am.isSpeakerphoneOn
+            am.mode = if (am.mode == AudioManager.MODE_NORMAL) AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
         }
+        println("after audio mode--->" + am.isWiredHeadsetOn + "---" + am.mode + "----" + am.isSpeakerphoneOn)
     }
 }

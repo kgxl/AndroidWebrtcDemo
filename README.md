@@ -1,6 +1,13 @@
 # AndroidWebrtcDemo
 Android webrtc，一对一视频。
 
+- 实现功能
+    - 一对一视频
+    - 麦克风静音
+    - 切换前后摄像头
+    - 大小视频切换
+    - 声音听筒和扬声器切换
+
 #### install server
 - 安装node.js
 - cd /server目录
